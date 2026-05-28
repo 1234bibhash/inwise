@@ -86,6 +86,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.3.4",
     "@tailwindcss/postcss": "^4.2.0",
     "@types/node": "^22",

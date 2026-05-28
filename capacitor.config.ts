@@ -2,10 +2,10 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.myapp',
-  appName: 'My App',
+  appName: 'InWise',
   webDir: 'public',
   server: {
-    url: 'http://localhost:3000',
+    url: 'https://inwise.vercel.app',
     cleartext: true
   }
 };

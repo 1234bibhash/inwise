@@ -37,6 +37,7 @@ CRITICAL INSTRUCTIONS FOR TABLE EXTRACTION:
 5. For the product "sku", do NOT extract the HSN/SAC code (like 85166000). Look for a separate SKU or Item Code. If none exists, leave it empty.
 6. If the bill shows CGST (e.g. 9%) and SGST (e.g. 9%) at the bottom, the "tax_percentage" for the items is the sum (e.g. 18).
 7. VERY IMPORTANT: Product names and model numbers often span MULTIPLE LINES within the same cell. You MUST combine all lines of text for a single item into the \`name\` field. Do not stop at the first line! For example, if line 1 says 'HITACHI 1.5 TON' and line 2 says 'G318PCC2SS INDOOR', the extracted name MUST be 'HITACHI 1.5 TON G318PCC2SS INDOOR'.
+8. WARNING: NEVER extract the HSN or SAC code as the Price/Rate. HSN codes are typically 4, 6, or 8 digit numbers (like 84151010 or 8516). The Price is a currency value with decimals (e.g., 30999.00 or 1.00) found under 'Price', 'Rate', or 'Unit Price' columns. Be extremely careful when columns are misaligned.
 
 First, provide a brief step-by-step reasoning (Chain-of-Thought) identifying the columns and your logic.
 Then, output the final JSON wrapped in \`\`\`json ... \`\`\`.
@@ -122,15 +123,30 @@ OUTPUT YOUR REASONING FIRST, THEN OUTPUT THE JSON WRAPPED IN \`\`\`json \`\`\`.`
       stream: false
     };
 
-    const response = await fetch(invokeUrl, {
-      method: 'POST',
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Accept": "application/json",
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
+    let response;
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+
+      response = await fetch(invokeUrl, {
+        method: 'POST',
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal as any
+      });
+
+      clearTimeout(timeoutId);
+    } catch (fetchError: any) {
+      console.error("Fetch to NVIDIA API failed:", fetchError);
+      if (fetchError.name === 'AbortError') {
+         throw new Error('The AI service timed out while processing your bill. Please try again.');
+      }
+      throw new Error(`Network error connecting to AI service: ${fetchError.message || fetchError.code || 'Connection Reset'}`);
+    }
 
     if (!response.ok) {
       const errText = await response.text();

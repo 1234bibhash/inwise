@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { getLedgers, addLedger, updateLedger, deleteLedger, LedgerRecord, UnderGroup, BalanceType, DealerType } from '@/lib/services/accountService'
 import { getInvoices, Invoice, createInvoice, updateInvoice, deleteInvoice } from '@/lib/services/invoiceService'
 import { getBusinessSettings, BusinessSettings } from '@/lib/services/settingsService'
@@ -49,16 +49,21 @@ import {
   FileDigit,
   Landmark,
   Scale,
-  Trash2
+  Trash2,
+  Eye,
+  Download,
+  MoreVertical
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Switch } from '@/components/ui/switch'
 import { useRouter } from 'next/navigation'
+import { DocumentRenderer } from '@/components/DocumentRenderer'
 
 const GROUPS: string[] = [
   'Sundry Creditors', 'Sundry Debtors', 'Secured Loans', 'Unsecured Loans', 
   'Bank Accounts', 'Cash-in-hand', 'Direct Expenses', 'Indirect Expenses',
   'Cash Receipt', 'UPI Receipt', 'Finance Receipt', 'Cheque Receipt', 'NEFT Receipt',
+  'Opening Stock', 'Closing Stock',
   'TA - Trade Advance'
 ]
 
@@ -84,7 +89,7 @@ export default function AccountsPage() {
   const [isReceiptFormOpen, setIsReceiptFormOpen] = useState(false)
   const [activeReceiptType, setActiveReceiptType] = useState<UnderGroup | null>(null)
   const [editingReceiptId, setEditingReceiptId] = useState<string | null>(null)
-  const [previewInvoice, setPreviewInvoice] = useState<any>(null)
+  const [previewDocument, setPreviewDocument] = useState<{ type: 'invoice' | 'receipt', id: string, data: any } | null>(null)
   const [receiptFormData, setReceiptFormData] = useState({
     amount: '',
     receipt_destination_type: 'bank' as 'bank' | 'upi',
@@ -119,6 +124,120 @@ export default function AccountsPage() {
   // Report State
   const [isReportSheetOpen, setIsReportSheetOpen] = useState(false)
   const [reportFilters, setReportFilters] = useState({ fy: 'FY 2026-2027', month: 'All' })
+
+  // Shallow URL syncing for preview state
+  const hasSyncedFromUrl = useRef(false);
+
+  useEffect(() => {
+    if (!hasSyncedFromUrl.current && invoices.length > 0) {
+      const params = new URLSearchParams(window.location.search)
+      const previewId = params.get('preview')
+      if (previewId) {
+        const inv = invoices.find(i => i.id === previewId)
+        if (inv) {
+          setPreviewDocument({ type: inv.is_receipt_invoice ? 'receipt' : 'invoice', id: inv.id, data: inv })
+        }
+      }
+      hasSyncedFromUrl.current = true;
+    }
+  }, [invoices])
+
+  useEffect(() => {
+    if (previewDocument) {
+      const params = new URLSearchParams(window.location.search)
+      params.set('preview', previewDocument.id)
+      window.history.replaceState(null, '', `?${params.toString()}`)
+    } else {
+      const params = new URLSearchParams(window.location.search)
+      params.delete('preview')
+      window.history.replaceState(null, '', `?${params.toString()}`)
+    }
+  }, [previewDocument])
+
+  // Ledger Creation Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if user is typing in an input
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
+        return;
+      }
+      
+      if (e.altKey) {
+        let groupToSelect: UnderGroup | null = null;
+        switch (e.key.toLowerCase()) {
+          case 'p': groupToSelect = 'Sundry Creditors'; break; // P for Payables
+          case 'd': groupToSelect = 'Sundry Debtors'; break;
+          case 'l': groupToSelect = 'Secured Loans'; break; // L for Loans
+          case 'u': groupToSelect = 'Unsecured Loans'; break;
+          case 'b': groupToSelect = 'Bank Accounts'; break;
+          case 'c': groupToSelect = 'Cash-in-hand'; break;
+          case 'e': groupToSelect = 'Direct Expenses'; break; // E for Expenses
+          case 'i': groupToSelect = 'Indirect Expenses'; break; // I for Indirect
+          case 'r': groupToSelect = 'Cash Receipt'; break; // R for Receipt
+          case 'y': groupToSelect = 'UPI Receipt'; break; // Y for upY
+          case 'f': groupToSelect = 'Finance Receipt'; break; // F for Finance
+          case 'q': groupToSelect = 'Cheque Receipt'; break; // Q for cheQue
+          case 'n': groupToSelect = 'NEFT Receipt'; break; // N for NEFT
+          case 'o': groupToSelect = 'Opening Stock'; break; // O for Opening
+          case 'k': groupToSelect = 'Closing Stock'; break; // K for stocK
+          case 't': groupToSelect = 'TA - Trade Advance'; break; // T for Trade
+        }
+
+        if (groupToSelect) {
+          e.preventDefault();
+          setCreationMode('ledger');
+          let newBalanceType: BalanceType = 'Cr';
+          // Determine if it should default to Dr balance
+          if (['Sundry Debtors', 'Cash-in-hand', 'Bank Accounts', 'Direct Expenses', 'Indirect Expenses', 'Opening Stock', 'Closing Stock', 'TA - Trade Advance'].includes(groupToSelect)) {
+            newBalanceType = 'Dr';
+          }
+          setFormData(prev => ({
+            ...prev,
+            under_group: groupToSelect!,
+            balance_type: newBalanceType
+          }));
+          setIsAddSheetOpen(true);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+
+  // Keyboard Navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!previewDocument) return
+      
+      if (e.key === 'Escape') {
+        setPreviewDocument(null)
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        if (!selectedLedger) return;
+        const customerInvoices = invoices.filter(inv => inv.customer_name.toLowerCase() === selectedLedger.ledger_name.toLowerCase())
+        if (customerInvoices.length === 0) return;
+        
+        const currentIndex = customerInvoices.findIndex(inv => inv.id === previewDocument.id)
+        if (currentIndex === -1) return;
+
+        let nextIndex = currentIndex;
+        if (e.key === 'ArrowRight') {
+          nextIndex = (currentIndex + 1) % customerInvoices.length;
+        } else if (e.key === 'ArrowLeft') {
+          nextIndex = (currentIndex - 1 + customerInvoices.length) % customerInvoices.length;
+        }
+
+        const nextInv = customerInvoices[nextIndex];
+        setPreviewDocument({ type: nextInv.is_receipt_invoice ? 'receipt' : 'invoice', id: nextInv.id, data: nextInv })
+      } else if (e.key === 'p' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        window.print();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [previewDocument, invoices, selectedLedger])
 
   useEffect(() => {
     loadLedgers()
@@ -279,12 +398,20 @@ export default function AccountsPage() {
              finance_provider: activeReceiptType === 'Finance Receipt' ? receiptFormData.registration_type : undefined
            }
         };
-        await createInvoice(newInvoice);
-        toast.success('Receipt Invoice generated successfully');
+        
+        // Optimistic UI Update
+        setInvoices([newInvoice, ...invoices]);
+        setIsReceiptFormOpen(false);
+        setReceiptFormData({ amount: '', receipt_destination_type: 'bank', receipt_destination_bank: '', receipt_destination_id: '', registration_type: 'Regular' });
+
+        createInvoice(newInvoice).then(() => {
+          toast.success('Receipt Invoice generated successfully');
+          getInvoices().then(setInvoices);
+        }).catch(() => {
+          toast.error('Failed to save receipt on server');
+          getInvoices().then(setInvoices);
+        });
       }
-      
-      const invs = await getInvoices();
-      setInvoices(invs);
     } else {
       let newReceipts = [...mockReceipts];
       if (editingReceiptId) {
@@ -624,6 +751,7 @@ export default function AccountsPage() {
                   </div>
 
                   <div className="bg-white border border-[#ededeb] rounded-xl overflow-hidden shadow-sm">
+                  <div className="overflow-x-auto w-full custom-scrollbar pb-2">
                     <table className="w-full text-left text-[13px]">
                       <thead>
                         <tr className="bg-[#f7f7f5] border-b border-[#ededeb] text-[#37352f]/60 uppercase tracking-widest text-[10px] font-bold">
@@ -661,6 +789,7 @@ export default function AccountsPage() {
                         )}
                       </tbody>
                     </table>
+                  </div>
                   </div>
 
                 </div>
@@ -785,7 +914,7 @@ export default function AccountsPage() {
                               <Label className="text-[11px] font-bold text-[#37352f]">Under</Label>
                               <Select value={formData.under_group} onValueChange={(val: UnderGroup) => {
                                 let newBalanceType = formData.balance_type;
-                                if (val === 'Sundry Debtors') newBalanceType = 'Dr';
+                                if (['Sundry Debtors', 'Opening Stock', 'Closing Stock'].includes(val)) newBalanceType = 'Dr';
                                 else if (val === 'Sundry Creditors') newBalanceType = 'Cr';
                                 setFormData({...formData, under_group: val, balance_type: newBalanceType});
                               }}>
@@ -1076,6 +1205,7 @@ export default function AccountsPage() {
 
         {/* Data Table - Tally Style */}
         <div className="bg-white border border-[#ededeb] rounded-xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto w-full custom-scrollbar pb-2">
           <table className="w-full text-left text-[13px]">
             <thead>
               <tr className="bg-[#f7f7f5] border-b border-[#ededeb] text-[#37352f]/60 uppercase tracking-widest text-[10px] font-bold">
@@ -1273,6 +1403,7 @@ export default function AccountsPage() {
             </tbody>
           </table>
         </div>
+        </div>
       </main>
 
       {/* Ledger Voucher View (Tally-Style) */}
@@ -1455,11 +1586,9 @@ export default function AccountsPage() {
                   // Force Debtors to ALWAYS use 'Dr' for math and display as requested by user
                   const effectiveBalType = 'Dr';
 
-                  // Calculate Current Total (Debit Side total)
-                  const currentTotalDr = (effectiveBalType === 'Dr' ? selectedLedger.opening_balance : 0) + runningTotalDr;
-                  const currentTotalCr = (effectiveBalType === 'Cr' ? selectedLedger.opening_balance : 0) + runningTotalCr;
-                  
-                  const isBalanced = currentTotalDr === currentTotalCr;
+                  // Calculate Closing Balances
+                  const closingTotalDr = (effectiveBalType === 'Dr' ? selectedLedger.opening_balance : 0) + runningTotalDr;
+                  const closingTotalCr = (effectiveBalType === 'Cr' ? selectedLedger.opening_balance : 0) + runningTotalCr;
 
                   const ledgerStart = new Date(selectedLedger.created_at || new Date());
                   const firstTxn = allTransactions.length > 0 ? new Date(allTransactions[0].date) : null;
@@ -1503,6 +1632,7 @@ export default function AccountsPage() {
 
                       {/* Modern Table */}
                       <div className="bg-white border-x border-[#ededeb]">
+                      <div className="overflow-x-auto w-full custom-scrollbar pb-2">
                         <table className="w-full text-left text-[12px] font-mono whitespace-nowrap">
                           <thead className="bg-[#f7f7f5] shadow-sm border-b border-[#ededeb]">
                             <tr className="text-[#acaba9] text-[10px] uppercase tracking-widest font-black">
@@ -1532,12 +1662,8 @@ export default function AccountsPage() {
                                 <td className="px-3 py-2 font-bold text-gray-600 italic border-r border-[#ededeb]">Opening Balance</td>
                                 <td className="px-3 py-2 border-r border-[#ededeb]"></td>
                                 <td className="px-3 py-2 border-r border-[#ededeb]"></td>
-                                <td className="px-3 py-2 text-right font-bold border-r border-[#ededeb] text-[#37352f]">
-                                  {effectiveBalType === 'Dr' ? selectedLedger.opening_balance.toLocaleString('en-IN', {minimumFractionDigits: 2}) : ''}
-                                </td>
-                                <td className="px-3 py-2 text-right font-bold border-r border-[#ededeb] text-[#37352f]">
-                                  {effectiveBalType === 'Cr' ? selectedLedger.opening_balance.toLocaleString('en-IN', {minimumFractionDigits: 2}) : ''}
-                                </td>
+                                <td className="px-3 py-2 text-right font-bold border-r border-[#ededeb] text-[#37352f]"></td>
+                                <td className="px-3 py-2 text-right font-bold border-r border-[#ededeb] text-[#37352f]"></td>
                                 <td className="px-3 py-2 text-right font-bold text-gray-500">
                                   {selectedLedger.opening_balance.toLocaleString('en-IN', {minimumFractionDigits: 2})} 
                                   <span 
@@ -1557,9 +1683,9 @@ export default function AccountsPage() {
                             {transactionsWithBalance.map(txn => (
                               <tr key={txn.id} className="hover:bg-gray-50/50 border-b border-[#ededeb] transition-colors cursor-pointer group" onClick={() => {
                                 if (txn.isReceiptInvoice) {
-                                  setPreviewInvoice(txn.rawInvoice);
+                                  setPreviewDocument({ type: 'receipt', id: txn.id, data: txn.rawInvoice });
                                 } else if (txn.isInvoice) {
-                                  router.push(`/owner/billing?invoice_id=${txn.id}`);
+                                  setPreviewDocument({ type: 'invoice', id: txn.id, data: txn.rawInvoice });
                                 } else if (txn.vchType === 'Receipt' || txn.vchType === 'Journal') {
                                   handleEditClick(txn);
                                 }
@@ -1568,7 +1694,11 @@ export default function AccountsPage() {
                                 <td className="px-3 py-2 border-r border-[#ededeb]">
                                   <div className="font-bold text-[#37352f]">{txn.particulars}</div>
                                 </td>
-                                <td className="px-3 py-2 border-r border-[#ededeb] align-top text-gray-500">{txn.vchType}</td>
+                                <td className="px-3 py-2 border-r border-[#ededeb] align-top text-gray-500">
+                                  <Badge className={`${txn.vchType === 'Sales Invoice' ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : txn.vchType === 'Cash Receipt' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : txn.vchType === 'UPI Receipt' ? 'bg-purple-100 text-purple-700 hover:bg-purple-200' : txn.vchType === 'Finance Receipt' ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} border-none shadow-none text-[9px] uppercase tracking-wider`}>
+                                    {txn.vchType}
+                                  </Badge>
+                                </td>
                                 <td className="px-3 py-2 border-r border-[#ededeb] align-top text-gray-400">{txn.vchNo}</td>
                                 <td className="px-3 py-2 text-right font-bold border-r border-[#ededeb] align-top text-[#37352f]">
                                   {txn.debit > 0 ? txn.debit.toLocaleString('en-IN', {minimumFractionDigits: 2}) : ''}
@@ -1578,34 +1708,64 @@ export default function AccountsPage() {
                                 </td>
                                 <td className="px-3 py-2 text-right font-bold align-top text-gray-500 flex justify-end gap-2 items-center">
                                   {txn.runningBalance.toLocaleString('en-IN', {minimumFractionDigits: 2})} {txn.runningBalanceType}
-                                  {(txn.vchType === 'Receipt' || txn.vchType === 'Journal') && (
-                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteReceipt(txn.id); }} className="opacity-0 group-hover:opacity-100 text-rose-500 hover:text-rose-600 transition-opacity ml-2">
-                                      <Trash2 className="h-3 w-3" />
-                                    </button>
-                                  )}
+                                  
+                                  {/* Hover Actions */}
+                                  <div className="opacity-0 group-hover:opacity-100 transition-opacity ml-2 flex items-center gap-2">
+                                    {(txn.isInvoice || txn.isReceiptInvoice) && (
+                                      <>
+                                        <button 
+                                          className="text-blue-500 hover:text-blue-700" 
+                                          onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            setPreviewDocument({ type: txn.isReceiptInvoice ? 'receipt' : 'invoice', id: txn.id, data: txn.rawInvoice }); 
+                                          }}
+                                          title="Quick Preview"
+                                        >
+                                          <Eye className="h-4 w-4" />
+                                        </button>
+                                        <button 
+                                          className="text-emerald-500 hover:text-emerald-700" 
+                                          onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            setPreviewDocument({ type: txn.isReceiptInvoice ? 'receipt' : 'invoice', id: txn.id, data: txn.rawInvoice }); 
+                                            setTimeout(() => window.print(), 100);
+                                          }}
+                                          title="Download/Print"
+                                        >
+                                          <Download className="h-4 w-4" />
+                                        </button>
+                                      </>
+                                    )}
+                                    {(txn.vchType === 'Receipt' || txn.vchType === 'Journal') && !txn.isReceiptInvoice && (
+                                      <button onClick={(e) => { e.stopPropagation(); handleDeleteReceipt(txn.id); }} className="text-rose-500 hover:text-rose-600">
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
                       </div>
+                      </div>
 
                       {/* Modern Footer */}
                       <div className="bg-[#f7f7f5] border-x border-b border-[#ededeb] px-4 py-3 text-[12px] font-mono flex flex-col">
                         <div className="flex justify-end gap-16 mb-2 text-gray-500">
                           <div className="w-[150px] text-right font-bold uppercase tracking-widest text-[10px]">Opening Balance :</div>
-                          <div className="w-[120px] text-right font-bold">{selectedLedger.opening_balance.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
+                          <div className="w-[120px] text-right font-bold">{selectedLedger.opening_balance.toLocaleString('en-IN', {minimumFractionDigits: 2})} {effectiveBalType}</div>
                         </div>
                         <div className="flex justify-end gap-16 mb-2 text-gray-500">
                           <div className="w-[150px] text-right font-bold uppercase tracking-widest text-[10px]">Current Total :</div>
                           <div className="flex">
-                            <div className="w-[120px] text-right font-bold px-2">{currentTotalDr.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
-                            <div className="w-[120px] text-right font-bold">{currentTotalCr.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
+                            <div className="w-[120px] text-right font-bold px-2">{runningTotalDr > 0 ? runningTotalDr.toLocaleString('en-IN', {minimumFractionDigits: 2}) : '0.00'}</div>
+                            <div className="w-[120px] text-right font-bold">{runningTotalCr > 0 ? runningTotalCr.toLocaleString('en-IN', {minimumFractionDigits: 2}) : '0.00'}</div>
                           </div>
                         </div>
                         <div className="flex justify-end gap-16 text-[#37352f] pt-2 border-t border-[#ededeb]">
                           <div className="w-[150px] text-right font-black uppercase tracking-widest text-[11px]">Closing Balance :</div>
-                          <div className="w-[120px] text-right font-black">{Math.abs(currentTotalDr - currentTotalCr).toLocaleString('en-IN', {minimumFractionDigits: 2})} {currentTotalDr > currentTotalCr ? 'Dr' : (currentTotalCr > currentTotalDr ? 'Cr' : '')}</div>
+                          <div className="w-[120px] text-right font-black">{Math.abs(closingTotalDr - closingTotalCr).toLocaleString('en-IN', {minimumFractionDigits: 2})} {closingTotalDr > closingTotalCr ? 'Dr' : (closingTotalCr > closingTotalDr ? 'Cr' : '')}</div>
                         </div>
                       </div>
                       
@@ -1857,48 +2017,35 @@ export default function AccountsPage() {
         </SheetContent>
       </Sheet>
 
-      <Sheet open={!!previewInvoice} onOpenChange={(open) => !open && setPreviewInvoice(null)}>
-        <SheetContent className="sm:max-w-md w-full border-l border-[#ededeb]">
-          <SheetHeader>
-            <SheetTitle className="text-xl font-black text-[#37352f]">Receipt Preview</SheetTitle>
-          </SheetHeader>
-          {previewInvoice && (
-            <div className="space-y-6 mt-8">
-              <div className="bg-[#fcfcfb] rounded-lg border border-[#ededeb] p-6 space-y-4">
-                <div className="flex justify-between border-b border-gray-100 pb-3">
-                  <span className="text-gray-500 font-medium text-sm">Receipt No:</span>
-                  <span className="font-bold text-[#37352f] text-sm">{previewInvoice.invoice_number}</span>
-                </div>
-                <div className="flex justify-between border-b border-gray-100 pb-3">
-                  <span className="text-gray-500 font-medium text-sm">Date:</span>
-                  <span className="font-bold text-[#37352f] text-sm">
-                    {new Date(previewInvoice.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                  </span>
-                </div>
-                <div className="flex justify-between border-b border-gray-100 pb-3">
-                  <span className="text-gray-500 font-medium text-sm">Amount:</span>
-                  <span className="font-black text-[#37352f] text-lg">₹{previewInvoice.total_amount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
-                </div>
-                <div className="flex justify-between pb-1">
-                  <span className="text-gray-500 font-medium text-sm">Payment Mode:</span>
-                  <span className="font-bold text-[#37352f] text-sm uppercase">
-                    {previewInvoice.payment_info?.mode} 
-                    {previewInvoice.payment_info?.finance_provider ? ` (${previewInvoice.payment_info.finance_provider})` : ''}
-                  </span>
-                </div>
-              </div>
-              
-              <div className="flex flex-col gap-3 pt-4">
-                <Button 
-                   className="w-full h-11 font-bold bg-[#37352f] text-white hover:bg-black"
-                   onClick={() => router.push('/owner/child')}
-                >
-                  View / Print Receipt
-                </Button>
-                <Button variant="outline" className="w-full h-11 font-bold border-[#ededeb]" onClick={() => setPreviewInvoice(null)}>Close</Button>
-              </div>
+      <Sheet open={!!previewDocument} onOpenChange={(open) => !open && setPreviewDocument(null)}>
+        <SheetContent className="sm:max-w-[900px] w-full border-l border-[#ededeb] p-0 flex flex-col h-full bg-[#fcfcfb]">
+          <SheetHeader className="p-4 border-b border-[#ededeb] bg-white flex flex-row items-center justify-between shrink-0 print:hidden">
+            <SheetTitle className="text-lg font-black text-[#37352f]">
+              {previewDocument?.type === 'receipt' ? 'Receipt Preview' : 'Invoice Preview'}
+            </SheetTitle>
+            <div className="flex items-center gap-2 pr-8">
+               <Button variant="outline" size="sm" className="h-8 font-bold" onClick={() => window.print()}>
+                  <Download className="h-4 w-4 mr-2" /> Print / Download
+               </Button>
             </div>
-          )}
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar">
+            {!previewDocument ? (
+               <div className="animate-pulse space-y-8">
+                 <div className="h-20 bg-gray-200 rounded-xl w-full"></div>
+                 <div className="h-40 bg-gray-200 rounded-xl w-full"></div>
+                 <div className="h-60 bg-gray-200 rounded-xl w-full"></div>
+               </div>
+            ) : (
+               <div className="shadow-lg rounded-xl overflow-hidden print:shadow-none">
+                 <DocumentRenderer 
+                   document={previewDocument.data} 
+                   type={previewDocument.type} 
+                   businessSettings={settings} 
+                 />
+               </div>
+            )}
+          </div>
         </SheetContent>
       </Sheet>
     </div>

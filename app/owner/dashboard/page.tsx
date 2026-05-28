@@ -33,6 +33,12 @@ import {
   deleteBalanceSheetEntry, 
   BalanceSheetEntry 
 } from '@/lib/services/balanceSheetService'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 
 interface DashboardStats {
   totalRevenue: number
@@ -119,6 +125,17 @@ export default function OwnerDashboard() {
     type: 'Expense',
     category: 'General'
   })
+
+  // Opening Stock explicit modal
+  const [showOpeningStockModal, setShowOpeningStockModal] = useState(false)
+  const [openingStockAmount, setOpeningStockAmount] = useState('')
+
+  // Group Details Modal
+  const [selectedGroup, setSelectedGroup] = useState<{
+    name: string,
+    type: 'LedgerGroup' | 'Sales' | 'ManualGroup',
+    items: any[]
+  } | null>(null)
 
   useEffect(() => {
     setMounted(true)
@@ -278,18 +295,37 @@ export default function OwnerDashboard() {
 
   const handleAddEntry = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newEntryForm.description || !newEntryForm.amount) return
+    if (!newEntryForm.amount || isNaN(Number(newEntryForm.amount))) return
 
-    await addBalanceSheetEntry({
+    const entry: Omit<BalanceSheetEntry, 'id'> = {
       description: newEntryForm.description,
       amount: Number(newEntryForm.amount),
       type: newEntryForm.type as any,
       category: newEntryForm.category,
-      date: new Date().toISOString().split('T')[0]
-    })
+      date: new Date().toISOString()
+    }
     
+    await addBalanceSheetEntry(entry)
     setShowAddModal(false)
     setNewEntryForm({ description: '', amount: '', type: 'Expense', category: 'General' })
+    fetchData()
+  }
+
+  const handleSetOpeningStock = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!openingStockAmount || isNaN(Number(openingStockAmount))) return
+
+    const entry: Omit<BalanceSheetEntry, 'id'> = {
+      description: 'Opening Stock for Period',
+      amount: Number(openingStockAmount),
+      type: 'Expense', // Debited to Trading A/c
+      category: 'Opening Stock',
+      date: new Date().toISOString()
+    }
+    
+    await addBalanceSheetEntry(entry)
+    setShowOpeningStockModal(false)
+    setOpeningStockAmount('')
     fetchData()
   }
 
@@ -325,45 +361,64 @@ export default function OwnerDashboard() {
   const totalOutflow = balanceEntries.filter(e => e.type === 'Expense').reduce((sum, e) => sum + e.amount, 0) +
                        currentLedgerOutflows
 
+  // Grouping logic for the condensed view
+  const groupedLedgers = Object.values(systemLedgers.reduce((acc, ledger) => {
+    const group = ledger.under_group || 'Other';
+    if (!acc[group]) {
+      acc[group] = { groupName: group, inflows: 0, outflows: 0, ledgers: [] };
+    }
+    const isCr = isLedgerInflow(ledger);
+    if (isCr) {
+      acc[group].inflows += (ledger.opening_balance || 0);
+    } else {
+      acc[group].outflows += (ledger.opening_balance || 0);
+    }
+    acc[group].ledgers.push(ledger);
+    return acc;
+  }, {} as Record<string, { groupName: string, inflows: number, outflows: number, ledgers: LedgerRecord[] }>)).filter(g => g.inflows > 0 || g.outflows > 0);
+
+  const totalSalesInflow = systemInvoices.reduce((sum, inv) => sum + inv.total_amount, 0);
+
+  const groupedManual = Object.values(balanceEntries.reduce((acc, entry) => {
+    const group = entry.category || 'General';
+    if (!acc[group]) {
+      acc[group] = { groupName: group, inflows: 0, outflows: 0, entries: [] };
+    }
+    if (entry.type === 'Income' || entry.type === 'Asset') {
+      acc[group].inflows += entry.amount;
+    } else {
+      acc[group].outflows += entry.amount;
+    }
+    acc[group].entries.push(entry);
+    return acc;
+  }, {} as Record<string, { groupName: string, inflows: number, outflows: number, entries: BalanceSheetEntry[] }>));
+
   return (
     <div className="min-h-screen pb-20 bg-[#fbfbfa]">
       {/* Premium Admin Header */}
-      <header className="h-14 bg-white border-b border-[#e9e9e8] flex items-center justify-between px-8 sticky top-0 z-10">
+      <header className="h-14 bg-white border-b border-[#e9e9e8] flex items-center justify-between px-4 md:px-8 sticky top-0 z-10">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold text-gray-900">Financial Dashboard</span>
+          <span className="text-sm font-semibold text-gray-900 hidden sm:block">Financial Dashboard</span>
+          <span className="text-sm font-semibold text-gray-900 sm:hidden">Dashboard</span>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 md:gap-4 shrink-0">
           <div className="flex items-center gap-2">
-            <div className="bg-[#f1f1f0] p-0.5 rounded-lg flex items-center">
-              <button 
-                onClick={() => setDateRange('day')}
-                className={cx("px-3 py-1 text-xs font-medium rounded-md transition-all", dateRange === 'day' ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}
+            <div className="bg-white border border-[#e9e9e8] rounded-lg flex items-center shadow-sm">
+              <select 
+                value={dateRange}
+                onChange={(e) => setDateRange(e.target.value as any)}
+                className="px-2 md:px-3 py-1.5 text-xs font-medium text-gray-700 bg-transparent outline-none focus:ring-0 cursor-pointer appearance-none"
               >
-                Day-wise
-              </button>
-              <button 
-                onClick={() => setDateRange('month')}
-                className={cx("px-3 py-1 text-xs font-medium rounded-md transition-all", dateRange === 'month' ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}
-              >
-                Month-wise
-              </button>
-              <button 
-                onClick={() => setDateRange('year')}
-                className={cx("px-3 py-1 text-xs font-medium rounded-md transition-all", dateRange === 'year' ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}
-              >
-                Year-wise
-              </button>
-              <button 
-                onClick={() => setDateRange('custom')}
-                className={cx("px-3 py-1 text-xs font-medium rounded-md transition-all", dateRange === 'custom' ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}
-              >
-                Custom Range
-              </button>
+                <option value="day">Day-wise</option>
+                <option value="month">Month-wise</option>
+                <option value="year">Year-wise</option>
+                <option value="custom">Custom Range</option>
+              </select>
             </div>
             
             
           </div>
-          <div className="flex items-center gap-1 border-l border-[#e9e9e8] pl-4">
+          <div className="flex items-center gap-1 border-l border-[#e9e9e8] pl-2 md:pl-4">
             <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-[#787774] hover:bg-[#efefed] hover:text-[#37352f]">
               <Bell className="h-4 w-4" />
             </Button>
@@ -371,13 +426,13 @@ export default function OwnerDashboard() {
         </div>
       </header>
 
-      <div className="p-8 max-w-[1400px] mx-auto space-y-8">
+      <div className="p-4 md:p-8 max-w-[1400px] mx-auto space-y-6 md:space-y-8">
         {/* Welcome Section */}
-        <div className="flex items-center justify-between text-left">
+        <div className="flex flex-col md:flex-row md:items-center justify-between text-left gap-4">
           <div className="space-y-1">
-            <h2 className="text-2xl font-bold text-[#37352f] tracking-tight flex items-center gap-4">
+            <h2 className="text-xl md:text-2xl font-bold text-[#37352f] tracking-tight flex flex-col sm:flex-row sm:items-center gap-2 md:gap-4">
                Financial Overview
-               <div className="flex items-center gap-3 text-sm font-medium bg-white px-3 py-1 rounded-md border border-gray-200 shadow-sm">
+               <div className="flex items-center gap-2 md:gap-3 text-xs md:text-sm font-medium bg-white px-3 py-1 rounded-md border border-gray-200 shadow-sm w-fit">
                   <span className="text-gray-500">Opening:</span>
                   <span className={openingBalance >= 0 ? "text-green-600" : "text-red-600"}>₹{openingBalance.toLocaleString('en-IN')}</span>
                   <div className="w-px h-4 bg-gray-200" />
@@ -387,7 +442,7 @@ export default function OwnerDashboard() {
                   </span>
                </div>
             </h2>
-            <p className="text-[#787774] text-sm tracking-tight">
+            <p className="text-[#787774] text-xs md:text-sm tracking-tight">
               Displaying aggregates for: <span className="text-[#37352f] font-semibold">
                 {dateRange === 'month' ? 'This Month' : 
                  dateRange === 'year' ? 'This Year' : 
@@ -400,7 +455,7 @@ export default function OwnerDashboard() {
               </span>
             </p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-2 md:gap-4">
              {dateRange === 'day' && (
                <div className="flex items-center gap-2">
                  <select 
@@ -527,16 +582,34 @@ export default function OwnerDashboard() {
 
         {/* Unified Editable Balance Sheet */}
         <div className="bg-white rounded-2xl border border-[#e9e9e8] shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-[#e9e9e8] flex items-center justify-between bg-gray-50/50">
+          <div className="p-6 border-b border-[#e9e9e8] flex flex-col md:flex-row md:items-center justify-between bg-gray-50/50 gap-4">
             <div>
               <h3 className="text-lg font-bold text-gray-900">Unified Balance Sheet</h3>
               <p className="text-sm text-gray-500">Connected to Invoices, Ledgers, and Service Hub. Add manual adjustments below.</p>
             </div>
-            <Button onClick={() => setShowAddModal(!showAddModal)} className="bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs px-4 h-9">
-              <Plus className="h-4 w-4 mr-2" />
-              Add Manual Entry
-            </Button>
+            <div className="flex gap-2 shrink-0">
+              <Button onClick={() => setShowOpeningStockModal(true)} variant="outline" className="text-blue-600 border-blue-200 hover:bg-blue-50 bg-white font-semibold rounded-md text-xs px-4 h-9">
+                Set Opening Stock
+              </Button>
+              <Button onClick={() => setShowAddModal(!showAddModal)} className="bg-gray-900 hover:bg-gray-800 text-white rounded-md text-xs px-4 h-9">
+                <Plus className="h-4 w-4 mr-2" />
+                Add Manual Entry
+              </Button>
+            </div>
           </div>
+
+          {showOpeningStockModal && (
+            <form onSubmit={handleSetOpeningStock} className="p-6 border-b border-gray-100 bg-blue-50/30 flex items-end gap-4">
+              <div className="space-y-1.5 flex-1">
+                <label className="text-xs font-semibold text-gray-600">Exact Opening Stock Amount (₹)</label>
+                <input required type="number" value={openingStockAmount} onChange={e => setOpeningStockAmount(e.target.value)} placeholder="0.00" className="w-full h-9 rounded-md border-gray-200 text-sm px-3 border focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" />
+              </div>
+              <Button type="submit" className="h-9 bg-blue-600 text-white hover:bg-blue-700 px-6 shrink-0">
+                <Save className="h-4 w-4 mr-2" />
+                Save Stock
+              </Button>
+            </form>
+          )}
 
           {showAddModal && (
             <form onSubmit={handleAddEntry} className="p-6 border-b border-gray-100 bg-blue-50/30 grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
@@ -564,120 +637,380 @@ export default function OwnerDashboard() {
             </form>
           )}
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-gray-500 bg-gray-50/50 uppercase font-semibold border-b border-gray-100">
-                <tr>
-                  <th className="px-6 py-4">Date</th>
-                  <th className="px-6 py-4">Source / Description</th>
-                  <th className="px-6 py-4">Category</th>
-                  <th className="px-6 py-4">Type</th>
-                  <th className="px-6 py-4 text-right">Inflow (Dr)</th>
-                  <th className="px-6 py-4 text-right">Outflow (Cr)</th>
-                  <th className="px-6 py-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {/* System Generated Invoices */}
-                {/* System Generated Invoices */}
-                {systemInvoices.map(invoice => (
-                  <tr key={invoice.id} className="bg-gray-50/30">
-                    <td className="px-6 py-4 font-medium text-gray-600">{new Date(invoice.created_at).toLocaleDateString('en-IN')}</td>
-                    <td className="px-6 py-4 font-semibold text-gray-900">Invoice - {invoice.customer_name || invoice.invoice_number}</td>
-                    <td className="px-6 py-4 text-gray-600">Sales</td>
-                    <td className="px-6 py-4"><span className="px-2 py-1 bg-green-100 text-green-700 rounded-md text-xs font-medium">Income</span></td>
-                    <td className="px-6 py-4 text-right font-medium text-green-600">+ ₹{invoice.total_amount.toLocaleString('en-IN')}</td>
-                    <td className="px-6 py-4 text-right text-gray-400">-</td>
-                    <td className="px-6 py-4 text-right text-gray-400 text-xs">Read-only</td>
-                  </tr>
-                ))}
+          {(() => {
+            const TRADING_DR_GROUPS = ['Opening Stock', 'Purchase Accounts', 'Direct Expenses'];
+            const TRADING_CR_GROUPS = ['Sales Accounts', 'Direct Incomes', 'Closing Stock'];
+            const PNL_DR_GROUPS = ['Indirect Expenses'];
+            const PNL_CR_GROUPS = ['Indirect Incomes'];
 
-                {/* System Generated Ledgers */}
-                {systemLedgers.map(ledger => {
-                  let isCr = ledger.balance_type === 'Cr';
-                  if (ledger.under_group === 'Trade Advance') isCr = false;
-                  if (ledger.under_group === 'Cheque Receipt') isCr = !!ledger.is_cashed;
+            const isPnlGroup = (name: string) => [...TRADING_DR_GROUPS, ...TRADING_CR_GROUPS, ...PNL_DR_GROUPS, ...PNL_CR_GROUPS].includes(name);
+
+            const liabilityGroups: any[] = [];
+            const assetGroups: any[] = [];
+            const pnlData = {
+              tradingDr: [] as any[],
+              tradingCr: [] as any[],
+              pnlDr: [] as any[],
+              pnlCr: [] as any[]
+            };
+
+            groupedLedgers.forEach(g => {
+              if (isPnlGroup(g.groupName)) {
+                 const isDr = g.outflows > g.inflows;
+                 const amount = Math.abs(g.outflows - g.inflows);
+                 const entry = { name: g.groupName, amount, items: g.ledgers };
+
+                 if (TRADING_DR_GROUPS.includes(g.groupName)) pnlData.tradingDr.push(entry);
+                 else if (TRADING_CR_GROUPS.includes(g.groupName)) pnlData.tradingCr.push(entry);
+                 else if (PNL_DR_GROUPS.includes(g.groupName)) pnlData.pnlDr.push(entry);
+                 else if (PNL_CR_GROUPS.includes(g.groupName)) pnlData.pnlCr.push(entry);
+                 else {
+                   if (isDr) pnlData.pnlDr.push(entry);
+                   else pnlData.pnlCr.push(entry);
+                 }
+              } else {
+                 if (g.inflows > g.outflows) {
+                   liabilityGroups.push({ name: g.groupName, amount: g.inflows - g.outflows, type: 'LedgerGroup', items: g.ledgers });
+                 } else if (g.outflows > g.inflows) {
+                   assetGroups.push({ name: g.groupName, amount: g.outflows - g.inflows, type: 'LedgerGroup', items: g.ledgers });
+                 }
+              }
+            });
+
+            groupedManual.forEach(g => {
+              const assetLiabEntries = g.entries.filter((e: any) => e.type === 'Asset' || e.type === 'Liability');
+              const incomeExpEntries = g.entries.filter((e: any) => e.type === 'Income' || e.type === 'Expense');
+
+              if (assetLiabEntries.length > 0) {
+                let inf = 0;
+                let out = 0;
+                assetLiabEntries.forEach((e: any) => {
+                  if (e.type === 'Asset') inf += e.amount;
+                  else out += e.amount;
+                });
+                if (inf > out) {
+                  liabilityGroups.push({ name: g.groupName, amount: inf - out, type: 'ManualGroup', items: assetLiabEntries });
+                } else if (out > inf) {
+                  assetGroups.push({ name: g.groupName, amount: out - inf, type: 'ManualGroup', items: assetLiabEntries });
+                }
+              }
+
+              if (incomeExpEntries.length > 0) {
+                let inc = 0;
+                let exp = 0;
+                incomeExpEntries.forEach((e: any) => {
+                  if (e.type === 'Income') inc += e.amount;
+                  else exp += e.amount;
+                });
+                if (inc > exp) {
+                  if (TRADING_CR_GROUPS.includes(g.groupName)) pnlData.tradingCr.push({ name: g.groupName, amount: inc - exp, items: incomeExpEntries });
+                  else pnlData.pnlCr.push({ name: g.groupName + ' (Income)', amount: inc - exp, items: incomeExpEntries });
+                } else if (exp > inc) {
+                  if (TRADING_DR_GROUPS.includes(g.groupName)) pnlData.tradingDr.push({ name: g.groupName, amount: exp - inc, items: incomeExpEntries });
+                  else pnlData.pnlDr.push({ name: g.groupName + ' (Expense)', amount: exp - inc, items: incomeExpEntries });
+                }
+              }
+            });
+
+            if (totalSalesInflow > 0) {
+              pnlData.tradingCr.push({ name: 'Sales Accounts', amount: totalSalesInflow, items: systemInvoices });
+            }
+
+            // AUTO-BALANCE LOGIC: Derive Opening Stock or Capital to balance the books
+            const baseLiabilities = liabilityGroups.reduce((s, g) => s + g.amount, 0);
+            const baseAssets = assetGroups.reduce((s, g) => s + g.amount, 0);
+            const tempTradingDr = pnlData.tradingDr.reduce((s, x) => s + x.amount, 0);
+            const tempTradingCr = pnlData.tradingCr.reduce((s, x) => s + x.amount, 0);
+            const tempPnlDr = pnlData.pnlDr.reduce((s, x) => s + x.amount, 0);
+            const tempPnlCr = pnlData.pnlCr.reduce((s, x) => s + x.amount, 0);
+
+            const tempNetPnl = (tempTradingCr + tempPnlCr) - (tempTradingDr + tempPnlDr);
+            
+            const tempTotalLiab = baseLiabilities + (tempNetPnl > 0 ? tempNetPnl : 0);
+            const tempTotalAssets = baseAssets + (tempNetPnl < 0 ? Math.abs(tempNetPnl) : 0);
+
+            if (tempTotalLiab > tempTotalAssets) {
+               const missing = tempTotalLiab - tempTotalAssets;
+               pnlData.tradingDr.unshift({ name: 'Opening Stock (Calculated)', amount: missing, items: [] });
+            } else if (tempTotalAssets > tempTotalLiab) {
+               const missing = tempTotalAssets - tempTotalLiab;
+               liabilityGroups.unshift({ name: 'Capital Account (Calculated)', amount: missing, type: 'System', items: [] });
+            }
+
+            // Final Calculations
+            const totalTradingDr = pnlData.tradingDr.reduce((s, x) => s + x.amount, 0);
+            const totalTradingCr = pnlData.tradingCr.reduce((s, x) => s + x.amount, 0);
+            let grossProfit = 0;
+            let grossLoss = 0;
+
+            if (totalTradingCr > totalTradingDr) {
+              grossProfit = totalTradingCr - totalTradingDr;
+              pnlData.pnlCr.unshift({ name: 'Gross Profit b/f', amount: grossProfit, items: [] });
+            } else if (totalTradingDr > totalTradingCr) {
+              grossLoss = totalTradingDr - totalTradingCr;
+              pnlData.pnlDr.unshift({ name: 'Gross Loss b/f', amount: grossLoss, items: [] });
+            }
+
+            const totalPnlDr = pnlData.pnlDr.reduce((s, x) => s + x.amount, 0);
+            const totalPnlCr = pnlData.pnlCr.reduce((s, x) => s + x.amount, 0);
+            let netProfit = 0;
+            let netLoss = 0;
+
+            if (totalPnlCr > totalPnlDr) {
+              netProfit = totalPnlCr - totalPnlDr;
+              liabilityGroups.push({ name: 'Profit & Loss A/c', amount: netProfit, type: 'PnL', items: pnlData });
+            } else if (totalPnlDr > totalPnlCr) {
+              netLoss = totalPnlDr - totalPnlCr;
+              assetGroups.push({ name: 'Profit & Loss A/c', amount: netLoss, type: 'PnL', items: pnlData });
+            }
+
+            const currentTotalLiabilities = liabilityGroups.reduce((s, g) => s + g.amount, 0);
+            const currentTotalAssets = assetGroups.reduce((s, g) => s + g.amount, 0);
+            
+            const finalTotal = Math.max(currentTotalLiabilities, currentTotalAssets);
+
+            return (
+              <div className="p-0 sm:p-0 overflow-x-hidden border-t border-[#e9e9e8]">
+                <div className="w-full flex flex-col font-sans text-sm text-[#37352f] bg-white">
                   
-                  return (
-                    <tr key={ledger.id} className="bg-gray-50/30">
-                      <td className="px-6 py-4 font-medium text-gray-600">{ledger.created_at ? new Date(ledger.created_at).toLocaleDateString('en-IN') : 'Auto-Synced'}</td>
-                      <td className="px-6 py-4 font-semibold text-gray-900">Ledger - {ledger.ledger_name}</td>
-                      <td className="px-6 py-4 text-gray-600">{ledger.under_group === 'Trade Advance' ? 'TA - Trade Advance' : ledger.under_group === 'Cheque Receipt' ? (ledger.is_cashed ? 'Cashed Cheque' : 'Pending Cheque') : ledger.under_group}</td>
-                      <td className="px-6 py-4">
-                        <span className={cx("px-2 py-1 rounded-md text-xs font-medium", isCr ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700")}>
-                          {isCr ? 'Credit (Cr)' : 'Debit (Dr)'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right font-medium text-green-600">{isCr ? `+ ₹${(ledger.opening_balance || 0).toLocaleString('en-IN')}` : '-'}</td>
-                      <td className="px-6 py-4 text-right font-medium text-red-600">{!isCr ? `- ₹${(ledger.opening_balance || 0).toLocaleString('en-IN')}` : '-'}</td>
-                      <td className="px-6 py-4 text-right text-gray-400 text-xs">Read-only</td>
-                    </tr>
-                  )
-                })}
+                  {/* Desktop Header (Hidden on Mobile) */}
+                  <div className="hidden md:flex border-b border-[#e9e9e8] bg-[#f7f7f5] text-[#787774] text-xs font-semibold uppercase tracking-wider">
+                    <div className="flex-1 border-r border-[#e9e9e8] p-4 flex justify-between items-center">
+                      <span className="font-bold">Liabilities</span>
+                    </div>
+                    <div className="flex-1 p-4 flex justify-between items-center">
+                      <span className="font-bold">Assets</span>
+                    </div>
+                  </div>
 
-                {/* Manual Entries */}
-                {balanceEntries.map(entry => (
-                  <tr key={entry.id} className="hover:bg-gray-50 transition-colors group">
-                    <td className="px-6 py-4 text-gray-600">{new Date(entry.date).toLocaleDateString('en-IN')}</td>
-                    <td className="px-6 py-4 font-medium text-gray-900">{entry.description}</td>
-                    <td className="px-6 py-4 text-gray-600">{entry.category}</td>
-                    <td className="px-6 py-4">
-                      <span className={cx("px-2 py-1 rounded-md text-xs font-medium", 
-                        entry.type === 'Income' ? 'bg-green-100 text-green-700' :
-                        entry.type === 'Expense' ? 'bg-red-100 text-red-700' :
-                        'bg-blue-100 text-blue-700'
-                      )}>
-                        {entry.type}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right font-medium text-green-600">
-                      {(entry.type === 'Income' || entry.type === 'Asset') ? `+ ₹${entry.amount.toLocaleString('en-IN')}` : '-'}
-                    </td>
-                    <td className="px-6 py-4 text-right font-medium text-red-600">
-                      {(entry.type === 'Expense' || entry.type === 'Liability') ? `- ₹${entry.amount.toLocaleString('en-IN')}` : '-'}
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <Button onClick={() => handleDeleteEntry(entry.id)} variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot className="bg-white font-medium border-t-2 border-[#ededeb]">
-                {/* Closing Balance (Carried Down) Row */}
-                <tr>
-                  <td colSpan={4} className="px-6 py-4 text-right text-[#37352f]/70 text-[13px] tracking-wide">
-                    Balance c/d (Closing Balance)
-                  </td>
-                  <td className="px-6 py-4 text-right text-green-600 font-semibold text-[14px]">
-                    {totalInflow < totalOutflow ? `+ ₹${(totalOutflow - totalInflow).toLocaleString('en-IN')}` : '-'}
-                  </td>
-                  <td className="px-6 py-4 text-right text-red-600 font-semibold text-[14px]">
-                    {totalInflow > totalOutflow ? `- ₹${(totalInflow - totalOutflow).toLocaleString('en-IN')}` : '-'}
-                  </td>
-                  <td className="px-6 py-4"></td>
-                </tr>
-                
-                {/* Tally Row */}
-                <tr className="bg-[#f7f7f5] border-t border-[#ededeb]">
-                  <td colSpan={4} className="px-6 py-5 text-right text-[#37352f] font-bold text-[14px] uppercase tracking-widest">
-                    Balance Sheet Total
-                  </td>
-                  <td className="px-6 py-5 text-right text-[#37352f] font-black text-[16px] border-double border-b-4 border-gray-400">
-                    ₹{Math.max(totalInflow, totalOutflow).toLocaleString('en-IN')}
-                  </td>
-                  <td className="px-6 py-5 text-right text-[#37352f] font-black text-[16px] border-double border-b-4 border-gray-400">
-                    ₹{Math.max(totalInflow, totalOutflow).toLocaleString('en-IN')}
-                  </td>
-                  <td className="px-6 py-5"></td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+                  {/* Body Container */}
+                  <div className="flex flex-col md:flex-row md:min-h-[350px]">
+                    
+                    {/* Liabilities Section */}
+                    <div className="flex-1 md:border-r border-[#e9e9e8] flex flex-col">
+                      {/* Mobile Liabilities Header */}
+                      <div className="md:hidden border-b border-[#e9e9e8] bg-[#f7f7f5] p-3 text-[#787774] text-xs font-bold uppercase tracking-wider">
+                        Liabilities
+                      </div>
+                      <div className="p-4 gap-1 flex flex-col flex-1">
+                        {liabilityGroups.map(g => (
+                          <div 
+                            key={g.name} 
+                            className="flex justify-between hover:bg-gray-50/80 p-2 -mx-2 rounded-lg cursor-pointer group transition-colors"
+                            onClick={() => g.type !== 'System' && setSelectedGroup(g)}
+                          >
+                            <span className={`font-medium group-hover:text-blue-600 transition-colors ${g.type === 'System' ? 'text-gray-400 italic' : 'text-gray-900'}`}>{g.name}</span>
+                            <span className={`font-bold ${g.type === 'System' ? 'text-gray-400' : 'text-gray-900'}`}>{g.amount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      {/* Mobile Liabilities Total (Optional but helpful if list is long) */}
+                      <div className="md:hidden border-t border-[#e9e9e8] bg-[#fbfbfa] p-4 flex justify-between font-black text-lg border-b-4 border-b-gray-300">
+                        <span>Total</span>
+                        <span>{finalTotal.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                      </div>
+                    </div>
+
+                    {/* Assets Section */}
+                    <div className="flex-1 flex flex-col border-t-8 border-t-gray-100 md:border-t-0">
+                      {/* Mobile Assets Header */}
+                      <div className="md:hidden border-b border-[#e9e9e8] bg-[#f7f7f5] p-3 text-[#787774] text-xs font-bold uppercase tracking-wider">
+                        Assets
+                      </div>
+                      <div className="p-4 gap-1 flex flex-col flex-1">
+                        {assetGroups.map(g => (
+                          <div 
+                            key={g.name} 
+                            className="flex justify-between hover:bg-gray-50/80 p-2 -mx-2 rounded-lg cursor-pointer group transition-colors"
+                            onClick={() => g.type !== 'System' && setSelectedGroup(g)}
+                          >
+                            <span className={`font-medium group-hover:text-blue-600 transition-colors ${g.type === 'System' ? 'text-gray-400 italic' : 'text-gray-900'}`}>{g.name}</span>
+                            <span className={`font-bold ${g.type === 'System' ? 'text-gray-400' : 'text-gray-900'}`}>{g.amount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Mobile Assets Total */}
+                      <div className="md:hidden border-t border-[#e9e9e8] bg-[#fbfbfa] p-4 flex justify-between font-black text-lg border-b-4 border-b-gray-300 mb-6">
+                        <span>Total</span>
+                        <span>{finalTotal.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Desktop Footer (Hidden on Mobile) */}
+                  <div className="hidden md:flex border-t border-[#e9e9e8] bg-[#fbfbfa] text-[#37352f]">
+                    <div className="flex-1 border-r border-[#e9e9e8] p-4 flex justify-between font-black text-lg border-b-4 border-double border-t-2 border-t-[#e9e9e8] border-b-gray-300">
+                      <span>Total</span>
+                      <span>{finalTotal.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div className="flex-1 p-4 flex justify-between font-black text-lg border-b-4 border-double border-t-2 border-t-[#e9e9e8] border-b-gray-300">
+                      <span>Total</span>
+                      <span>{finalTotal.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
         </div>
 
       </div>
+
+      {/* Details Sheet Modal */}
+      <Sheet open={!!selectedGroup} onOpenChange={(open) => !open && setSelectedGroup(null)}>
+        <SheetContent className="sm:max-w-[700px] w-full p-0 flex flex-col bg-[#fbfbfa]">
+          {selectedGroup && selectedGroup.type === 'PnL' ? (
+            <>
+              <SheetHeader className="p-6 bg-white border-b border-[#e9e9e8]">
+                <SheetTitle className="text-xl font-bold text-[#37352f]">
+                  Profit & Loss A/c
+                </SheetTitle>
+                <p className="text-sm text-gray-500 font-medium">Trading and Profit & Loss Account for the period</p>
+              </SheetHeader>
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar bg-[#fbfbfa]">
+                <div className="border border-[#e9e9e8] bg-white rounded-lg shadow-sm flex flex-col font-sans text-sm text-[#37352f] overflow-hidden">
+                  
+                  {/* Top Section: Trading Account */}
+                  <div className="bg-[#f7f7f5] px-4 py-2 border-b border-[#e9e9e8] font-bold text-[#787774] text-xs uppercase tracking-wider text-center">
+                    Trading Account
+                  </div>
+                  <div className="flex border-b border-[#e9e9e8] bg-[#fbfbfa] text-[#787774] text-xs font-semibold uppercase tracking-wider">
+                    <div className="flex-1 border-r border-[#e9e9e8] p-3 flex justify-between items-center"><span className="font-bold">Particulars</span><span className="font-bold">Amount</span></div>
+                    <div className="flex-1 p-3 flex justify-between items-center"><span className="font-bold">Particulars</span><span className="font-bold">Amount</span></div>
+                  </div>
+                  <div className="flex min-h-[150px]">
+                    <div className="flex-1 border-r border-[#e9e9e8] p-3 flex flex-col gap-1">
+                      {selectedGroup.items.tradingDr.map((g: any) => (
+                        <div key={g.name} className="flex justify-between py-1 border-b border-dashed border-gray-100 last:border-0">
+                           <span className={`font-medium ${g.name.includes('Gross Loss') ? 'text-gray-500 italic' : 'text-gray-900'}`}>{g.name}</span>
+                           <span className="font-bold">{g.amount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex-1 p-3 flex flex-col gap-1">
+                      {selectedGroup.items.tradingCr.map((g: any) => (
+                        <div key={g.name} className="flex justify-between py-1 border-b border-dashed border-gray-100 last:border-0">
+                           <span className={`font-medium ${g.name.includes('Gross Profit') ? 'text-gray-500 italic' : 'text-gray-900'}`}>{g.name}</span>
+                           <span className="font-bold">{g.amount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex border-t border-b-2 border-[#e9e9e8] bg-[#fbfbfa] text-[#37352f]">
+                    <div className="flex-1 border-r border-[#e9e9e8] p-3 flex justify-between font-bold">
+                      <span>Total</span>
+                      <span>{Math.max(
+                        selectedGroup.items.tradingDr.reduce((s:number, x:any)=>s+x.amount, 0),
+                        selectedGroup.items.tradingCr.reduce((s:number, x:any)=>s+x.amount, 0)
+                      ).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div className="flex-1 p-3 flex justify-between font-bold">
+                      <span>Total</span>
+                      <span>{Math.max(
+                        selectedGroup.items.tradingDr.reduce((s:number, x:any)=>s+x.amount, 0),
+                        selectedGroup.items.tradingCr.reduce((s:number, x:any)=>s+x.amount, 0)
+                      ).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                    </div>
+                  </div>
+
+                  {/* Bottom Section: P&L Account */}
+                  <div className="bg-[#f7f7f5] px-4 py-2 border-b border-[#e9e9e8] font-bold text-[#787774] text-xs uppercase tracking-wider text-center mt-2">
+                    Profit & Loss Account
+                  </div>
+                  <div className="flex border-b border-[#e9e9e8] bg-[#fbfbfa] text-[#787774] text-xs font-semibold uppercase tracking-wider">
+                    <div className="flex-1 border-r border-[#e9e9e8] p-3 flex justify-between items-center"><span className="font-bold">Particulars</span><span className="font-bold">Amount</span></div>
+                    <div className="flex-1 p-3 flex justify-between items-center"><span className="font-bold">Particulars</span><span className="font-bold">Amount</span></div>
+                  </div>
+                  <div className="flex min-h-[150px]">
+                    <div className="flex-1 border-r border-[#e9e9e8] p-3 flex flex-col gap-1">
+                      {selectedGroup.items.pnlDr.map((g: any) => (
+                        <div key={g.name} className="flex justify-between py-1 border-b border-dashed border-gray-100 last:border-0">
+                           <span className={`font-medium ${g.name.includes('Loss') || g.name.includes('Profit') ? 'text-gray-500 italic' : 'text-gray-900'}`}>{g.name}</span>
+                           <span className="font-bold">{g.amount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex-1 p-3 flex flex-col gap-1">
+                      {selectedGroup.items.pnlCr.map((g: any) => (
+                        <div key={g.name} className="flex justify-between py-1 border-b border-dashed border-gray-100 last:border-0">
+                           <span className={`font-medium ${g.name.includes('Profit') || g.name.includes('Loss') ? 'text-gray-500 italic' : 'text-gray-900'}`}>{g.name}</span>
+                           <span className="font-bold">{g.amount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex border-t border-[#e9e9e8] bg-[#fbfbfa] text-[#37352f]">
+                    <div className="flex-1 border-r border-[#e9e9e8] p-3 flex justify-between font-black text-lg border-b-4 border-double border-t-2 border-t-[#e9e9e8] border-b-gray-300">
+                      <span>Total</span>
+                      <span>{Math.max(
+                        selectedGroup.items.pnlDr.reduce((s:number, x:any)=>s+x.amount, 0),
+                        selectedGroup.items.pnlCr.reduce((s:number, x:any)=>s+x.amount, 0)
+                      ).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div className="flex-1 p-3 flex justify-between font-black text-lg border-b-4 border-double border-t-2 border-t-[#e9e9e8] border-b-gray-300">
+                      <span>Total</span>
+                      <span>{Math.max(
+                        selectedGroup.items.pnlDr.reduce((s:number, x:any)=>s+x.amount, 0),
+                        selectedGroup.items.pnlCr.reduce((s:number, x:any)=>s+x.amount, 0)
+                      ).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </>
+          ) : selectedGroup && (
+            <>
+              <SheetHeader className="p-6 bg-white border-b border-[#e9e9e8]">
+                <SheetTitle className="text-xl font-bold text-[#37352f]">
+                  {selectedGroup.name}
+                </SheetTitle>
+                <p className="text-sm text-gray-500 font-medium">Detailed breakdown of {selectedGroup.items.length} items</p>
+              </SheetHeader>
+              
+              <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                <div className="bg-white border border-[#e9e9e8] rounded-xl overflow-hidden shadow-sm">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-[#f7f7f5] text-[#787774] text-xs font-semibold uppercase tracking-wider border-b border-[#e9e9e8]">
+                      <tr>
+                        <th className="px-4 py-3">Date</th>
+                        <th className="px-4 py-3">Description</th>
+                        <th className="px-4 py-3 text-right">Inflow (Dr)</th>
+                        <th className="px-4 py-3 text-right">Outflow (Cr)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#e9e9e8]">
+                      {selectedGroup.type === 'LedgerGroup' && selectedGroup.items.map((l: any) => {
+                        const isCr = isLedgerInflow(l);
+                        return (
+                          <tr key={l.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-4 py-3 text-gray-500">{l.created_at ? new Date(l.created_at).toLocaleDateString('en-IN') : '-'}</td>
+                            <td className="px-4 py-3 font-medium text-gray-900">{l.ledger_name}</td>
+                            <td className="px-4 py-3 text-right text-green-600 font-semibold">{isCr ? `+ ₹${(l.opening_balance||0).toLocaleString('en-IN')}` : '-'}</td>
+                            <td className="px-4 py-3 text-right text-red-600 font-semibold">{!isCr ? `- ₹${(l.opening_balance||0).toLocaleString('en-IN')}` : '-'}</td>
+                          </tr>
+                        )
+                      })}
+
+                      {selectedGroup.type === 'ManualGroup' && selectedGroup.items.map((e: any) => (
+                        <tr key={e.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-3 text-gray-500">{new Date(e.date).toLocaleDateString('en-IN')}</td>
+                          <td className="px-4 py-3 font-medium text-gray-900">{e.description}</td>
+                          <td className="px-4 py-3 text-right text-green-600 font-semibold">{(e.type === 'Income' || e.type === 'Asset') ? `+ ₹${e.amount.toLocaleString('en-IN')}` : '-'}</td>
+                          <td className="px-4 py-3 text-right text-red-600 font-semibold">{(e.type === 'Expense' || e.type === 'Liability') ? `- ₹${e.amount.toLocaleString('en-IN')}` : '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

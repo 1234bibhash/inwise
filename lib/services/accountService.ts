@@ -1,4 +1,4 @@
-export type UnderGroup = 'Sundry Creditors' | 'Sundry Debtors' | 'Secured Loans' | 'Unsecured Loans' | 'Bank Accounts' | 'Cash-in-hand' | 'Direct Expenses' | 'Indirect Expenses' | 'Cash Receipt' | 'UPI Receipt' | 'Finance Receipt' | 'Cheque Receipt' | 'NEFT Receipt' | 'Trade Advance';
+export type UnderGroup = 'Sundry Creditors' | 'Sundry Debtors' | 'Secured Loans' | 'Unsecured Loans' | 'Bank Accounts' | 'Cash-in-hand' | 'Direct Expenses' | 'Indirect Expenses' | 'Cash Receipt' | 'UPI Receipt' | 'Finance Receipt' | 'Cheque Receipt' | 'NEFT Receipt' | 'Trade Advance' | 'Opening Stock' | 'Closing Stock';
 export type BalanceType = 'Dr' | 'Cr';
 export type DealerType = 'Regular' | 'Composition' | 'Unregistered' | 'Consumer';
 

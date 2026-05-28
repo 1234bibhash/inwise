@@ -7,6 +7,7 @@ import { createWarranty } from '@/lib/services/warrantyService'
 import { logSale } from '@/lib/services/orderService'
 import { createServiceCall } from '@/lib/services/serviceCallService'
 import { addLedger, getLedgers, updateLedger, type UnderGroup } from '@/lib/services/accountService'
+import { DocumentRenderer } from '@/components/DocumentRenderer'
 
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -43,8 +44,16 @@ import {
   Upload,
   Loader2,
   CheckCircle2,
-  Edit3
+  Edit3,
+  Edit,
+  Eye
 } from 'lucide-react'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle
+} from '@/components/ui/sheet'
 import {
   Dialog,
   DialogContent,
@@ -248,6 +257,7 @@ export default function BillingPage() {
   const [isViewOnly, setIsViewOnly] = useState(false)
   const [profitData, setProfitData] = useState<any[]>([])
   const [marginData, setMarginData] = useState<any[]>([])
+  const [previewDocument, setPreviewDocument] = useState<{ type: 'invoice' | 'receipt', id: string, data: any } | null>(null)
   const [showAdvancedBilling, setShowAdvancedBilling] = useState(false)
   const [isDoModalOpen, setIsDoModalOpen] = useState(false)
   const [isScanningDo, setIsScanningDo] = useState(false)
@@ -1045,6 +1055,22 @@ export default function BillingPage() {
     setIsViewOnly(true)
     setView('editor')
   }
+
+  // Keyboard navigation for preview document
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!previewDocument) return
+      
+      if (e.key === 'Escape') {
+        setPreviewDocument(null)
+      } else if (e.key === 'p' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        window.print();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [previewDocument])
 
   const handleSaveInvoice = async () => {
     setIsSavingInvoice(true)
@@ -2012,6 +2038,7 @@ export default function BillingPage() {
           </div>
 
           <div className="border rounded-t-lg overflow-hidden mb-6" style={{ borderColor: businessSettings?.brand_color || '#0070a4' }}>
+          <div className="overflow-x-auto w-full custom-scrollbar pb-2">
             <table className="w-full text-left border-collapse table-fixed">
               <thead>
                 <tr className="text-white" style={{ backgroundColor: businessSettings?.brand_color || '#0070a4' }}>
@@ -2293,6 +2320,7 @@ export default function BillingPage() {
                 })}
               </tbody>
             </table>
+          </div>
             {!isViewOnly && pageIndex === productChunks.length - 1 && (
               <div className="p-2 bg-[#fcfcfb] border-t border-[#f1f1f0] print:hidden">
                 <button 
@@ -2552,10 +2580,7 @@ export default function BillingPage() {
   return (
     <div className="min-h-screen bg-[#f8f9fb] flex flex-col pb-24 relative font-sans selection:bg-purple-100 selection:text-purple-900">
       <div className="p-10 max-w-[1400px] mx-auto w-full space-y-12 mt-8">
-        {/* Premium Realistic Analytical Core */}
-        {/* Senior Developer Minimal Analytical Core */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-           {/* Card 1: Net Profit */}
            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm flex flex-col justify-between h-full">
               <div className="flex items-center gap-3 mb-6">
                 <div className="h-10 w-10 rounded-lg bg-gray-50 flex items-center justify-center border border-gray-100">
@@ -2575,7 +2600,6 @@ export default function BillingPage() {
               </div>
            </div>
 
-           {/* Card 2: Total Revenue */}
            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm flex flex-col justify-between h-full">
               <div className="flex items-center gap-3 mb-6">
                 <div className="h-10 w-10 rounded-lg bg-gray-50 flex items-center justify-center border border-gray-100">
@@ -2595,7 +2619,6 @@ export default function BillingPage() {
               </div>
            </div>
 
-           {/* Card 3: Avg. Margin */}
            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm flex flex-col justify-between h-full">
               <div className="flex items-center gap-3 mb-6">
                 <div className="h-10 w-10 rounded-lg bg-gray-50 flex items-center justify-center border border-gray-100">
@@ -2648,6 +2671,7 @@ export default function BillingPage() {
                )}
            </div>
            <div className="overflow-x-auto">
+            <div className="overflow-x-auto w-full custom-scrollbar pb-2">
               <table className="w-full text-left">
                  <thead>
                     <tr className="bg-gray-50/50 border-b border-gray-100">
@@ -2689,8 +2713,7 @@ export default function BillingPage() {
                       invoices.map(inv => (
                          <tr 
                             key={inv.id} 
-                            onClick={() => handleViewInvoice(inv)}
-                            className={`cursor-pointer group transition-colors ${selectedInvoiceIds.includes(inv.id) ? 'bg-blue-50/50' : 'hover:bg-gray-50'}`}
+                            className={`group transition-colors ${selectedInvoiceIds.includes(inv.id) ? 'bg-blue-50/50' : 'hover:bg-gray-50'}`}
                           >
                             <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
                                <input 
@@ -2727,13 +2750,13 @@ export default function BillingPage() {
                                   {inv.status}
                                </Badge>
                             </td>
-                            <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                               <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <Button variant="ghost" size="icon" onClick={() => handleViewInvoice(inv)} className="h-8 w-8 text-gray-500 hover:text-blue-600 hover:bg-blue-50">
-                                     <Download className="h-4 w-4" />
+                            <td className="px-6 py-4 text-right">
+                               <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Button variant="ghost" size="icon" onClick={() => setPreviewDocument({ type: inv.is_receipt_invoice ? 'receipt' : 'invoice', id: inv.id, data: inv })} className="h-8 w-8 text-gray-500 hover:text-blue-600 hover:bg-blue-50" title="Quick Preview">
+                                    <Eye className="h-4 w-4" />
                                   </Button>
-                                  <Button variant="ghost" size="icon" onClick={() => handleViewInvoice(inv)} className="h-8 w-8 text-gray-500 hover:text-gray-900 hover:bg-gray-100">
-                                     <Printer className="h-4 w-4" />
+                                  <Button variant="ghost" size="icon" onClick={() => handleViewInvoice(inv)} className="h-8 w-8 text-gray-500 hover:text-gray-900 hover:bg-gray-100" title="Edit in Workspace">
+                                    <Edit className="h-4 w-4" />
                                   </Button>
                                </div>
                             </td>
@@ -2742,6 +2765,7 @@ export default function BillingPage() {
                     )}
                  </tbody>
               </table>
+            </div>
            </div>
         </div>
       </div>
@@ -2944,6 +2968,39 @@ export default function BillingPage() {
            </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Document Preview Sheet */}
+      <Sheet open={!!previewDocument} onOpenChange={(open) => !open && setPreviewDocument(null)}>
+        <SheetContent className="sm:max-w-[900px] w-full border-l border-[#ededeb] p-0 flex flex-col h-full bg-[#fcfcfb]">
+          <SheetHeader className="p-4 border-b border-[#ededeb] bg-white flex flex-row items-center justify-between shrink-0 print:hidden">
+            <SheetTitle className="text-lg font-black text-[#37352f]">
+              {previewDocument?.type === 'receipt' ? 'Receipt Preview' : 'Invoice Preview'}
+            </SheetTitle>
+            <div className="flex items-center gap-2 pr-8">
+               <Button variant="outline" size="sm" className="h-8 font-bold" onClick={() => window.print()}>
+                  <Download className="h-4 w-4 mr-2" /> Print / Download
+               </Button>
+            </div>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar">
+            {!previewDocument ? (
+               <div className="animate-pulse space-y-8">
+                 <div className="h-20 bg-gray-200 rounded-xl w-full"></div>
+                 <div className="h-40 bg-gray-200 rounded-xl w-full"></div>
+                 <div className="h-60 bg-gray-200 rounded-xl w-full"></div>
+               </div>
+            ) : (
+               <div className="shadow-lg rounded-xl overflow-hidden print:shadow-none">
+                 <DocumentRenderer 
+                   document={previewDocument.data} 
+                   type={previewDocument.type} 
+                   businessSettings={businessSettings} 
+                 />
+               </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
     </div>
   )
 }
