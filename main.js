@@ -20,7 +20,7 @@ function createWindow() {
   Menu.setApplicationMenu(null);
 
   // Load the wrapper URL (using localhost for local dev/wrapping, replace with prod URL if deployed)
-  mainWindow.loadURL('http://localhost:3000');
+  mainWindow.loadURL('https://inwise.vercel.app');
   
   // mainWindow.webContents.openDevTools();
 }
